@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio Transcription</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Audio&nbsp;Transcription</h1>
+      <nav class="tabs">
+        <button class="tab active" data-view="work">Transcribe &amp; Summarize</button>
+        <button class="tab" data-view="settings">Settings</button>
+      </nav>
+    </header>
+
+    <!-- WORK VIEW -->
+    <main id="view-work" class="view active">
+      <section class="source">
+        <label class="file-btn">
+          Import audio file
+          <input type="file" id="file-input" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm" hidden />
+        </label>
+        <span class="muted">or</span>
+        <label class="lang-pick">
+          Mic
+          <select id="mic-select"><option value="">System default</option></select>
+        </label>
+        <button id="record-btn">● Record</button>
+        <span id="source-name" class="muted">No file selected</span>
+        <label class="lang-pick">
+          Language
+          <select id="lang-select">
+            <option value="auto">Auto-detect</option>
+            <option value="english">English</option>
+            <option value="spanish">Spanish</option>
+            <option value="french">French</option>
+            <option value="german">German</option>
+            <option value="italian">Italian</option>
+            <option value="portuguese">Portuguese</option>
+            <option value="dutch">Dutch</option>
+            <option value="russian">Russian</option>
+            <option value="arabic">Arabic</option>
+            <option value="hindi">Hindi</option>
+            <option value="chinese">Chinese</option>
+            <option value="japanese">Japanese</option>
+            <option value="korean">Korean</option>
+          </select>
+        </label>
+        <button id="transcribe-btn" disabled>Transcribe</button>
+      </section>
+
+      <div id="status" class="status" hidden></div>
+
+      <div class="panes">
+        <section class="pane">
+          <div class="pane-head">
+            <h2>Transcript</h2>
+            <button id="export-transcript" disabled>Export .txt</button>
+          </div>
+          <div id="transcript" class="pane-body" aria-live="polite">
+            <p class="muted">Import a file and press Transcribe.</p>
+          </div>
+        </section>
+
+        <section class="pane">
+          <div class="pane-head">
+            <h2>Summary</h2>
+            <button id="summarize-btn" disabled>Summarize</button>
+          </div>
+          <p id="privacy-note" class="privacy">
+            ⚠️ Transcription runs locally. <strong>Summarizing sends the transcript text to your
+            configured LLM provider.</strong>
+          </p>
+          <div id="summary" class="pane-body" aria-live="polite">
+            <p class="muted">Summarize a transcript to see key points and action items.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- SETTINGS VIEW -->
+    <main id="view-settings" class="view">
+      <section class="settings">
+        <h2>Summarization provider</h2>
+        <label>
+          Provider
+          <select id="set-provider">
+            <option value="ollama">Ollama — local LLM (offline, no key)</option>
+            <option value="claude">Claude — cloud (Anthropic API)</option>
+          </select>
+        </label>
+
+        <div id="claude-fields">
+          <label>
+            Cloud model (Claude)
+            <input type="text" id="set-model" placeholder="claude-opus-4-8" />
+          </label>
+          <label>
+            API key
+            <input type="password" id="set-apikey" placeholder="Enter to set / leave blank to keep" />
+          </label>
+          <p id="key-status" class="muted"></p>
+        </div>
+
+        <div id="ollama-fields">
+          <label>
+            Ollama server URL
+            <input type="text" id="set-ollama-url" placeholder="http://localhost:11434" />
+          </label>
+          <label>
+            Local model
+            <input type="text" id="set-ollama-model" placeholder="llama3.1" />
+          </label>
+          <p class="muted">Requires Ollama running locally with the model pulled (e.g. <code>ollama pull llama3.1</code>). The transcript stays on your machine.</p>
+        </div>
+
+        <button id="save-settings">Save settings</button>
+        <span id="settings-saved" class="saved" hidden>Saved ✓</span>
+
+        <h2>Transcription</h2>
+        <label>
+          Whisper model
+          <select id="set-whisper"></select>
+        </label>
+        <p id="whisper-model-note" class="muted"></p>
+      </section>
+    </main>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

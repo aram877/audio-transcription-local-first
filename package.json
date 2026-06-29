@@ -1,0 +1,20 @@
+{
+  "name": "audio-transcription",
+  "version": "0.1.0",
+  "description": "Desktop app: record or import audio, transcribe locally with Whisper, and summarize with an LLM.",
+  "main": "src/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "@huggingface/transformers": "^3.0.0"
+  }
+}

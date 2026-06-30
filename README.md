@@ -42,6 +42,7 @@ src/
   main/            Electron main process (window, IPC)
     transcription/ local Whisper engine
     summarization/ provider interface + Ollama (local) + Claude (cloud)
+    storage/       recordings library (audio + transcript + summary on disk)
     settings.js    preferences + encrypted API-key storage
     main.js, preload.js
   renderer/        UI (decode/resample audio, record, views)
@@ -49,8 +50,19 @@ src/
 openspec/          spec-driven change docs (proposal, design, specs, tasks)
 ```
 
+## Library (local persistence)
+
+Every transcription is **saved automatically** to a local library on your machine — no
+cloud, no account. Each recording lives under the app's `userData/recordings/<id>/`
+folder as the original audio plus a `record.json` holding its transcript and summary.
+
+- Open the **Library** tab to browse past recordings (newest first).
+- Select one to **play the audio**, read its **transcript**, and view (or generate) its **summary**.
+- **Delete** removes that recording's audio, transcript, and summary from disk.
+
+Summaries you generate later are written back onto the saved recording.
+
 ## Notes / not yet implemented
 
-- Recordings and results are **not persisted to disk** yet (in-memory per session).
 - No chunking for very long transcripts that exceed a small local model's context window.
 - See `openspec/changes/add-audio-transcription/tasks.md` for full status.

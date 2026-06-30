@@ -37,4 +37,13 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (partial) => ipcRenderer.invoke('settings:save', partial),
   saveApiKey: (apiKey) => ipcRenderer.invoke('settings:saveKey', apiKey),
+
+  // Recordings library (local persistence)
+  saveRecording: (input) => ipcRenderer.invoke('recordings:save', input),
+  updateRecordingTranscript: (id, transcript) => ipcRenderer.invoke('recordings:updateTranscript', id, transcript),
+  updateRecordingSummary: (id, summary) => ipcRenderer.invoke('recordings:updateSummary', id, summary),
+  listRecordings: () => ipcRenderer.invoke('recordings:list'),
+  getRecording: (id) => ipcRenderer.invoke('recordings:get', id),
+  getRecordingAudio: (id) => ipcRenderer.invoke('recordings:getAudio', id),
+  deleteRecording: (id) => ipcRenderer.invoke('recordings:delete', id),
 });

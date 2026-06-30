@@ -7,7 +7,14 @@ const TARGET_SAMPLE_RATE = 16000;
 const SUPPORTED_EXTS = ['wav', 'mp3', 'm4a', 'ogg', 'flac', 'webm'];
 
 const el = (id) => document.getElementById(id);
-const state = { pcm: null, sourceName: null, transcript: null, sourceBlob: null };
+const state = {
+  pcm: null,
+  sourceName: null,
+  sourceKind: null,   // 'import' | 'record'
+  transcript: null,
+  sourceBlob: null,   // original audio File/Blob (powers the waveform + persistence)
+  recordingId: null,  // id of the persisted record once saved
+};
 
 // ---- Audio player ----
 let audioEl = null;
@@ -114,8 +121,22 @@ document.querySelectorAll('.tab').forEach((tab) => {
         populateWhisperSelect(models, el('set-whisper').value);
       }).catch(() => {});
     }
+    // Refresh the saved-recordings list when the Library tab opens.
+    if (tab.dataset.view === 'library') loadLibrary();
   });
 });
+
+// Map a recorder/import MIME type to a file extension for on-disk storage.
+function extFromMime(mime) {
+  if (!mime) return 'webm';
+  if (mime.includes('webm')) return 'webm';
+  if (mime.includes('ogg')) return 'ogg';
+  if (mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')) return 'm4a';
+  if (mime.includes('mpeg') || mime.includes('mp3')) return 'mp3';
+  if (mime.includes('wav')) return 'wav';
+  if (mime.includes('flac')) return 'flac';
+  return 'webm';
+}
 
 // ---- Status helper ----
 function setStatus(msg, isError = false) {
@@ -138,6 +159,8 @@ el('file-input').addEventListener('change', async (e) => {
   }
 
   state.sourceName = file.name;
+  state.sourceKind = 'import';
+  state.recordingId = null; // a new piece of audio — not yet saved
   el('source-name').textContent = file.name;
   el('transcribe-btn').disabled = true;
   setStatus('Decoding audio…');
@@ -292,7 +315,9 @@ async function onRecordingStop() {
   try {
     state.pcm = await decodeAndResample(blob);
     if (!state.pcm || state.pcm.length === 0) throw new Error('decoded to empty audio');
-    state.sourceName = 'recording';
+    state.sourceName = 'Recording';
+    state.sourceKind = 'record';
+    state.recordingId = null; // a new piece of audio — not yet saved
     state.sourceBlob = blob;
     setupAudioPlayer(blob);
     const secs = (state.pcm.length / TARGET_SAMPLE_RATE).toFixed(1);
@@ -344,6 +369,7 @@ el('transcribe-btn').addEventListener('click', async () => {
     setStatus(`Transcribed ${transcript.segments.length} segment(s) — language: ${langLabel}.`);
     el('summarize-btn').disabled = false;
     el('export-transcript').disabled = false;
+    await persistAfterTranscribe(langLabel);
   } catch (err) {
     setStatus(`Transcription failed: ${err.message}`, true);
   } finally {
@@ -351,6 +377,39 @@ el('transcribe-btn').addEventListener('click', async () => {
     if (unsubscribeProgress) { unsubscribeProgress(); unsubscribeProgress = null; }
   }
 });
+
+// Auto-save the recording to the local library once we have a transcript.
+// Saves audio + transcript on first transcribe; updates the transcript on
+// re-transcribe of the same audio.
+async function persistAfterTranscribe(langLabel) {
+  if (!state.transcript) return;
+  const durationSec = state.pcm ? state.pcm.length / TARGET_SAMPLE_RATE : 0;
+  try {
+    if (state.recordingId) {
+      await window.api.updateRecordingTranscript(state.recordingId, state.transcript);
+    } else if (state.sourceBlob) {
+      const mime = state.sourceBlob.type || (state.sourceKind === 'record' ? 'audio/webm' : '');
+      // Prefer the imported file's real extension; fall back to one derived from the MIME type.
+      const ext = (state.sourceKind === 'import' && state.sourceName && state.sourceName.includes('.'))
+        ? state.sourceName.split('.').pop().toLowerCase()
+        : extFromMime(mime);
+      const audioBytes = await state.sourceBlob.arrayBuffer();
+      const meta = await window.api.saveRecording({
+        audioBytes,
+        mime,
+        ext,
+        source: { kind: state.sourceKind || 'record', name: state.sourceName || 'Recording' },
+        durationSec,
+        transcript: state.transcript,
+      });
+      state.recordingId = meta.id;
+      setStatus(`Transcribed ${state.transcript.segments.length} segment(s) — language: ${langLabel}. Saved to Library ✓`);
+    }
+  } catch (err) {
+    // Persistence is best-effort; don't block the user's transcript on it.
+    setStatus(`Transcribed, but saving to Library failed: ${err.message}`, true);
+  }
+}
 
 function fmtTime(s) {
   const m = Math.floor(s / 60);
@@ -393,6 +452,9 @@ el('summarize-btn').addEventListener('click', async () => {
   try {
     const summary = await window.api.summarize(state.transcript.text);
     renderSummary(summary);
+    if (state.recordingId) {
+      try { await window.api.updateRecordingSummary(state.recordingId, summary); } catch {}
+    }
   } catch (err) {
     el('summary').innerHTML = `<p class="muted">Summary failed: ${escapeHtml(err.message)}</p>`;
   } finally {
@@ -535,6 +597,194 @@ el('save-settings').addEventListener('click', async () => {
   const saved = el('settings-saved');
   saved.hidden = false;
   setTimeout(() => (saved.hidden = true), 1500);
+});
+
+// ================= Library =================
+const lib = { items: [], selectedId: null, audioUrl: null };
+
+function fmtDate(iso) {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+}
+
+function fmtBytes(n) {
+  if (!n) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function loadLibrary() {
+  const listEl = el('lib-items');
+  try {
+    lib.items = await window.api.listRecordings();
+  } catch (err) {
+    listEl.innerHTML = `<li class="muted">Could not load recordings: ${escapeHtml(err.message)}</li>`;
+    return;
+  }
+  if (lib.items.length === 0) {
+    listEl.innerHTML = '<li class="muted">No saved recordings yet.</li>';
+    return;
+  }
+  listEl.innerHTML = '';
+  for (const m of lib.items) {
+    const li = document.createElement('li');
+    li.className = 'lib-item' + (m.id === lib.selectedId ? ' active' : '');
+    li.dataset.id = m.id;
+    const dur = fmtTime(m.durationSec || 0);
+    const badges = [
+      m.detected ? `${escapeHtml(m.language || '')} (detected)` : (m.language && m.language !== 'auto' ? escapeHtml(m.language) : ''),
+      m.hasSummary ? '📝 summary' : '',
+    ].filter(Boolean).join(' · ');
+    li.innerHTML = `
+      <div class="lib-item-title">${escapeHtml(m.source?.name || 'Recording')}</div>
+      <div class="lib-item-sub muted">${fmtDate(m.createdAt)} · ${dur}${badges ? ' · ' + badges : ''}</div>`;
+    li.addEventListener('click', () => openRecording(m.id));
+    listEl.appendChild(li);
+  }
+}
+
+function clearAudioUrl() {
+  if (lib.audioUrl) { URL.revokeObjectURL(lib.audioUrl); lib.audioUrl = null; }
+}
+
+async function openRecording(id) {
+  lib.selectedId = id;
+  // Highlight the active item.
+  document.querySelectorAll('#lib-items .lib-item').forEach((li) => {
+    li.classList.toggle('active', li.dataset.id === id);
+  });
+
+  let record;
+  try {
+    record = await window.api.getRecording(id);
+  } catch (err) {
+    setStatus(`Could not open recording: ${err.message}`, true);
+    return;
+  }
+  lib.current = record;
+
+  el('lib-empty').hidden = true;
+  el('lib-detail-body').hidden = false;
+  el('lib-title').textContent = record.source?.name || 'Recording';
+
+  const t = record.transcript || {};
+  const langLabel = t.detected ? `${t.language} (detected)` : (t.language && t.language !== 'auto' ? t.language : 'auto');
+  el('lib-meta').textContent =
+    `${fmtDate(record.createdAt)} · ${fmtTime(record.durationSec || 0)} · ${langLabel}` +
+    (record.audio?.bytes ? ` · ${fmtBytes(record.audio.bytes)}` : '');
+
+  renderTranscriptInto(el('lib-transcript'), record.transcript);
+  renderSummaryInto(el('lib-summary'), record.summary);
+  el('lib-summarize').textContent = record.summary ? 'Re-summarize' : 'Summarize';
+
+  // Load audio bytes and wire up the player.
+  clearAudioUrl();
+  const audio = el('lib-audio');
+  audio.removeAttribute('src');
+  try {
+    const { bytes, mime } = await window.api.getRecordingAudio(id);
+    lib.audioUrl = URL.createObjectURL(new Blob([bytes], { type: mime || 'audio/webm' }));
+    audio.src = lib.audioUrl;
+  } catch (err) {
+    setStatus(`Audio unavailable: ${err.message}`, true);
+  }
+}
+
+function renderTranscriptInto(box, t) {
+  box.innerHTML = '';
+  if (!t || (!t.segments?.length && !t.text)) {
+    box.innerHTML = '<p class="muted">No transcript.</p>';
+    return;
+  }
+  if (!t.segments || t.segments.length === 0) {
+    box.innerHTML = `<p>${escapeHtml(t.text || '')}</p>`;
+    return;
+  }
+  for (const seg of t.segments) {
+    const div = document.createElement('div');
+    div.className = 'segment';
+    div.innerHTML = `<span class="ts">[${fmtTime(seg.start)}]</span>${escapeHtml(seg.text)}`;
+    box.appendChild(div);
+  }
+}
+
+function renderSummaryInto(box, s) {
+  box.innerHTML = '';
+  if (!s) {
+    box.innerHTML = '<p class="muted">No summary yet. Press Summarize.</p>';
+    return;
+  }
+  const add = (title, items) => {
+    if (!items || items.length === 0) return;
+    const sec = document.createElement('div');
+    sec.className = 'summary-section';
+    sec.innerHTML = `<h3>${title}</h3><ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+    box.appendChild(sec);
+  };
+  const intro = document.createElement('p');
+  intro.textContent = s.text || '';
+  box.appendChild(intro);
+  add('Key points', s.keyPoints);
+  add('Action items', s.actionItems);
+}
+
+el('lib-refresh').addEventListener('click', loadLibrary);
+
+el('lib-delete').addEventListener('click', async () => {
+  if (!lib.selectedId) return;
+  const name = lib.current?.source?.name || 'this recording';
+  if (!window.confirm(`Delete "${name}"? This removes its audio, transcript, and summary from disk.`)) return;
+  const id = lib.selectedId;
+  try {
+    await window.api.deleteRecording(id);
+  } catch (err) {
+    setStatus(`Delete failed: ${err.message}`, true);
+    return;
+  }
+  // If the work view is showing this same record, detach so re-summarize won't
+  // resurrect a deleted record.
+  if (state.recordingId === id) state.recordingId = null;
+  clearAudioUrl();
+  el('lib-detail-body').hidden = true;
+  el('lib-empty').hidden = false;
+  lib.selectedId = null;
+  lib.current = null;
+  await loadLibrary();
+});
+
+el('lib-summarize').addEventListener('click', async () => {
+  if (!lib.current?.transcript?.text) return;
+  const btn = el('lib-summarize');
+  btn.disabled = true;
+  el('lib-summary').innerHTML = '<p class="muted">Summarizing…</p>';
+  try {
+    const summary = await window.api.summarize(lib.current.transcript.text);
+    lib.current.summary = summary;
+    renderSummaryInto(el('lib-summary'), summary);
+    btn.textContent = 'Re-summarize';
+    try { await window.api.updateRecordingSummary(lib.current.id, summary); } catch {}
+    await loadLibrary(); // refresh the "📝 summary" badge
+  } catch (err) {
+    el('lib-summary').innerHTML = `<p class="muted">Summary failed: ${escapeHtml(err.message)}</p>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el('lib-export').addEventListener('click', () => {
+  const t = lib.current?.transcript;
+  if (!t) return;
+  const lines = (t.segments || []).map((seg) => `[${fmtTime(seg.start)}] ${seg.text}`);
+  const blob = new Blob([lines.join('\n') || t.text || ''], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (lib.current.source?.name || 'transcript').replace(/\.[^.]+$/, '') + '.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
 });
 
 function escapeHtml(str) {

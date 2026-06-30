@@ -11,6 +11,7 @@
       <h1>Audio&nbsp;Transcription</h1>
       <nav class="tabs">
         <button class="tab active" data-view="work">Transcribe &amp; Summarize</button>
+        <button class="tab" data-view="library">Library</button>
         <button class="tab" data-view="settings">Settings</button>
       </nav>
     </header>
@@ -83,6 +84,56 @@
           </p>
           <div id="summary" class="pane-body" aria-live="polite">
             <p class="muted">Summarize a transcript to see key points and action items.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- LIBRARY VIEW -->
+    <main id="view-library" class="view">
+      <div class="library">
+        <aside class="lib-list">
+          <div class="lib-list-head">
+            <h2>Recordings</h2>
+            <button id="lib-refresh" title="Refresh">↻</button>
+          </div>
+          <ul id="lib-items" aria-live="polite">
+            <li class="muted">No saved recordings yet.</li>
+          </ul>
+        </aside>
+
+        <section class="lib-detail">
+          <div id="lib-empty" class="muted lib-empty">
+            Select a recording to view its audio, transcript, and summary.
+          </div>
+          <div id="lib-detail-body" hidden>
+            <div class="lib-detail-head">
+              <div>
+                <h2 id="lib-title">Recording</h2>
+                <p id="lib-meta" class="muted"></p>
+              </div>
+              <button id="lib-delete" class="danger">Delete</button>
+            </div>
+
+            <audio id="lib-audio" controls preload="none"></audio>
+
+            <div class="panes">
+              <section class="pane">
+                <div class="pane-head">
+                  <h2>Transcript</h2>
+                  <button id="lib-export">Export .txt</button>
+                </div>
+                <div id="lib-transcript" class="pane-body"></div>
+              </section>
+
+              <section class="pane">
+                <div class="pane-head">
+                  <h2>Summary</h2>
+                  <button id="lib-summarize">Summarize</button>
+                </div>
+                <div id="lib-summary" class="pane-body"></div>
+              </section>
+            </div>
           </div>
         </section>
       </div>

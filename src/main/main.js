@@ -9,6 +9,7 @@ const { isSupportedExtension, SUPPORTED_EXTENSIONS } = require('../shared/format
 const whisper = require('./transcription/whisper');
 const { getProvider, isLocal } = require('./summarization/provider');
 const settings = require('./settings');
+const recordings = require('./storage/recordings');
 
 let mainWindow = null;
 
@@ -156,4 +157,15 @@ function registerIpc() {
     settings.saveApiKey(apiKey);
     return { hasApiKey: settings.hasApiKey() };
   });
+
+  // --- Recordings library (local persistence) ---
+  ipcMain.handle('recordings:save', async (_e, input) => recordings.save(input));
+  ipcMain.handle('recordings:updateTranscript', async (_e, id, transcript) =>
+    recordings.updateTranscript(id, transcript));
+  ipcMain.handle('recordings:updateSummary', async (_e, id, summary) =>
+    recordings.updateSummary(id, summary));
+  ipcMain.handle('recordings:list', async () => recordings.list());
+  ipcMain.handle('recordings:get', async (_e, id) => recordings.get(id));
+  ipcMain.handle('recordings:getAudio', async (_e, id) => recordings.getAudio(id));
+  ipcMain.handle('recordings:delete', async (_e, id) => recordings.remove(id));
 }

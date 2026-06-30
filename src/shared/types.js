@@ -45,4 +45,30 @@
  * @property {Summary} [summary]
  */
 
+/**
+ * A recording persisted to the local library (userData/recordings/<id>/).
+ * @typedef {Object} StoredRecording
+ * @property {string} id                          - "rec_" + random hex
+ * @property {string} createdAt                   - ISO timestamp
+ * @property {AudioSource} source                 - origin + display name
+ * @property {number} durationSec                 - audio length in seconds
+ * @property {{file:string, mime:string, bytes:number}} audio - on-disk audio file info
+ * @property {Transcript|null} transcript
+ * @property {Summary|null} summary
+ */
+
+/**
+ * Lightweight metadata for the library list view (no transcript/summary payload).
+ * @typedef {Object} RecordingMeta
+ * @property {string} id
+ * @property {string} createdAt
+ * @property {AudioSource} source
+ * @property {number} durationSec
+ * @property {{mime:string, bytes:number}} audio
+ * @property {boolean} hasSummary
+ * @property {string|null} language
+ * @property {boolean} detected
+ * @property {number} segmentCount
+ */
+
 module.exports = {};

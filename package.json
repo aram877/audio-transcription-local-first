@@ -6,15 +6,44 @@
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "dist": "electron-builder"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.0.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
     "@huggingface/transformers": "^3.0.0"
+  },
+  "build": {
+    "appId": "io.aram877.audio-transcription",
+    "productName": "Audio Transcription",
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!node_modules/@huggingface/transformers/.cache/**"
+    ],
+    "asarUnpack": [
+      "**/onnxruntime-node/**",
+      "**/onnxruntime-web/**",
+      "**/@huggingface/transformers/**"
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }]
+    },
+    "linux": {
+      "target": [{ "target": "AppImage" }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

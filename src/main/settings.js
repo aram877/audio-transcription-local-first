@@ -17,6 +17,7 @@ const DEFAULTS = {
   ollamaModel: 'llama3.1',
   transcriptionModel: 'onnx-community/whisper-base',
   language: 'auto',
+  setupComplete: false,
 };
 
 function prefsPath() {

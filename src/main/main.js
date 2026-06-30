@@ -2,7 +2,8 @@
 // capture -> transcribe -> summarize pipeline.
 
 const path = require('path');
-const { app, BrowserWindow, ipcMain, dialog, session, systemPreferences } = require('electron');
+const os = require('os');
+const { app, BrowserWindow, ipcMain, dialog, session, shell, systemPreferences } = require('electron');
 
 const { isSupportedExtension, SUPPORTED_EXTENSIONS } = require('../shared/formats');
 const whisper = require('./transcription/whisper');
@@ -26,6 +27,10 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Point the model cache at userData so it works in both dev and packaged builds.
+  // Inside an ASAR archive node_modules is read-only; userData is always writable.
+  whisper.setCacheDir(path.join(app.getPath('userData'), 'models'));
+
   // Allow the renderer's getUserMedia (microphone) requests.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === 'media' || permission === 'audioCapture');
@@ -106,6 +111,37 @@ function registerIpc() {
     }
     return provider.summarize(transcriptText, { apiKey, model: prefs.summaryModel });
   });
+
+  // --- System info for setup wizard ---
+  ipcMain.handle('system:info', () => ({
+    ramGb: Math.round(os.totalmem() / 1073741824),
+    platform: process.platform,
+    arch: process.arch,
+  }));
+
+  // --- Ollama connectivity check ---
+  ipcMain.handle('ollama:check', async (_e, baseUrl) => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch(`${baseUrl || 'http://localhost:11434'}/api/version`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  });
+
+  // --- Whisper model pre-download for setup wizard ---
+  ipcMain.handle('whisper:preload', async (event, model) => {
+    const onProgress = (p) => {
+      if (!event.sender.isDestroyed()) event.sender.send('whisper:preload-progress', p);
+    };
+    await whisper.getPipeline(model, onProgress);
+  });
+
+  // --- Open URL in system browser ---
+  ipcMain.handle('shell:openExternal', (_e, url) => shell.openExternal(url));
 
   // --- Whisper model list with cache status ---
   ipcMain.handle('whisper:listModels', () => whisper.listModels());

@@ -15,7 +15,15 @@ const KNOWN_MODELS = [
   { id: 'onnx-community/whisper-large-v3',                   label: 'Whisper Large v3',                     size: '~3.1 GB', note: 'best accuracy, slow' },
 ];
 
+let _configuredCacheDir = null;
+
+function setCacheDir(dir) {
+  _configuredCacheDir = dir;
+}
+
 function _cacheDir() {
+  if (_configuredCacheDir) return _configuredCacheDir;
+  // Dev fallback: .cache next to the transformers package (not inside ASAR in prod).
   try {
     const pkg = require.resolve('@huggingface/transformers/package.json');
     return path.join(path.dirname(pkg), '.cache');
@@ -59,9 +67,10 @@ async function getPipeline(model, onProgress) {
 
   _loadedModel = model;
   _pipelinePromise = (async () => {
-    let pipeline;
+    let pipeline, env;
     try {
-      ({ pipeline } = await import('@huggingface/transformers'));
+      ({ pipeline, env } = await import('@huggingface/transformers'));
+      if (_configuredCacheDir) env.cacheDir = _configuredCacheDir;
     } catch (err) {
       throw new Error(
         'Transcription engine is not installed. Run `npm install` to add @huggingface/transformers.'
@@ -196,4 +205,4 @@ async function detectLanguage(asr, pcm) {
   }
 }
 
-module.exports = { transcribe, getPipeline, detectLanguage, listModels, DEFAULT_MODEL, TARGET_SAMPLE_RATE };
+module.exports = { transcribe, getPipeline, detectLanguage, listModels, setCacheDir, DEFAULT_MODEL, TARGET_SAMPLE_RATE };

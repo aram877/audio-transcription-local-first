@@ -53,6 +53,14 @@
 
       <div id="status" class="status" hidden></div>
 
+      <div id="audio-player" hidden>
+        <canvas id="waveform" height="72"></canvas>
+        <div class="player-controls">
+          <button id="play-btn" title="Play / Pause">▶</button>
+          <span id="play-time" class="muted">0:00 / 0:00</span>
+        </div>
+      </div>
+
       <div class="panes">
         <section class="pane">
           <div class="pane-head">
@@ -127,6 +135,109 @@
         <p id="whisper-model-note" class="muted"></p>
       </section>
     </main>
+
+    <!-- SETUP WIZARD OVERLAY (shown on first run) -->
+    <div id="setup-overlay" class="setup-overlay">
+      <div class="setup-card">
+        <div class="setup-step-dots" id="setup-dots"></div>
+
+        <!-- Step 0: Welcome -->
+        <div class="setup-pane" data-step="0">
+          <div class="setup-icon">🎙</div>
+          <h2>Welcome to Audio Transcription</h2>
+          <p class="setup-sub">Transcription runs 100% on your machine — no audio ever leaves it.</p>
+          <div id="sys-info-badge" class="sys-info-badge">Detecting hardware…</div>
+          <div class="setup-actions">
+            <button id="btn-welcome-next" class="btn-setup-primary">Get started →</button>
+          </div>
+        </div>
+
+        <!-- Step 1: Whisper model -->
+        <div class="setup-pane" data-step="1">
+          <h2>Transcription model</h2>
+          <p class="setup-sub">Whisper runs locally. We've highlighted the best fit for your hardware.</p>
+          <div id="setup-model-list" class="setup-model-list"></div>
+          <div class="setup-actions">
+            <button class="btn-setup-secondary setup-back">← Back</button>
+            <button id="btn-model-next" class="btn-setup-primary">Continue →</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Summarization -->
+        <div class="setup-pane" data-step="2">
+          <h2>Summarization <span class="badge-optional">optional</span></h2>
+          <p class="setup-sub">Transcription always works. Summarization is an optional add-on.</p>
+          <div class="summ-options">
+
+            <label class="summ-option">
+              <input type="radio" name="summ-provider" value="ollama" checked />
+              <div class="summ-option-body">
+                <div class="summ-option-title"><strong>Ollama</strong> <span class="badge-local">local · offline</span></div>
+                <p>Run a local LLM on your machine — nothing is sent anywhere.</p>
+                <div id="ollama-detail" class="provider-detail">
+                  <div class="ollama-row">
+                    <input id="ollama-url-input" type="text" value="http://localhost:11434" placeholder="http://localhost:11434" />
+                    <button id="btn-ollama-check" class="btn-setup-sm">Check</button>
+                    <span id="ollama-status"></span>
+                  </div>
+                  <p class="setup-hint">Model: <input id="ollama-model-input" type="text" value="llama3.1" /> — pull it first with <code>ollama pull llama3.1</code></p>
+                  <p id="ollama-install-hint" class="setup-hint warn" hidden>Ollama not detected — <a id="ollama-link" href="#">download Ollama →</a> then come back.</p>
+                </div>
+              </div>
+            </label>
+
+            <label class="summ-option">
+              <input type="radio" name="summ-provider" value="claude" />
+              <div class="summ-option-body">
+                <div class="summ-option-title"><strong>Claude</strong> <span class="badge-cloud">cloud</span></div>
+                <p>Anthropic's API — fast &amp; accurate, but the transcript text is sent to the cloud.</p>
+                <div id="claude-detail" class="provider-detail" hidden>
+                  <input id="claude-key-input" type="password" placeholder="sk-ant-…" />
+                </div>
+              </div>
+            </label>
+
+            <label class="summ-option">
+              <input type="radio" name="summ-provider" value="skip" />
+              <div class="summ-option-body">
+                <div class="summ-option-title"><strong>Skip for now</strong></div>
+                <p>Transcription only — configure summarization later in Settings.</p>
+              </div>
+            </label>
+
+          </div>
+          <div class="setup-actions">
+            <button class="btn-setup-secondary setup-back">← Back</button>
+            <button id="btn-summ-next" class="btn-setup-primary">Continue →</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Download -->
+        <div class="setup-pane" data-step="3">
+          <h2 id="dl-title">Downloading model…</h2>
+          <p id="dl-sub" class="setup-sub">One-time download. Transcription runs fully offline after this.</p>
+          <div class="dl-progress-wrap">
+            <div class="dl-bar-track"><div id="dl-bar" class="dl-bar"></div></div>
+            <div id="dl-label" class="dl-label">Starting…</div>
+          </div>
+          <p id="dl-error" class="setup-hint warn" hidden></p>
+          <div id="dl-retry-wrap" hidden style="margin-top:16px">
+            <button id="btn-dl-retry" class="btn-setup-primary">Retry download</button>
+          </div>
+        </div>
+
+        <!-- Step 4: Done -->
+        <div class="setup-pane" data-step="4">
+          <div class="setup-icon done-check">✓</div>
+          <h2>All set!</h2>
+          <p class="setup-sub">Audio Transcription is ready to use.</p>
+          <div class="setup-actions">
+            <button id="btn-done" class="btn-setup-primary">Get started →</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
 
     <script src="renderer.js"></script>
   </body>

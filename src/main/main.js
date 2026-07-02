@@ -3,7 +3,8 @@
 
 const path = require('path');
 const os = require('os');
-const { app, BrowserWindow, ipcMain, dialog, session, shell, systemPreferences } = require('electron');
+const fs = require('fs');
+const { app, BrowserWindow, ipcMain, dialog, session, shell, systemPreferences, desktopCapturer } = require('electron');
 
 const { isSupportedExtension, SUPPORTED_EXTENSIONS } = require('../shared/formats');
 const whisper = require('./transcription/whisper');
@@ -12,6 +13,39 @@ const settings = require('./settings');
 const recordings = require('./storage/recordings');
 
 let mainWindow = null;
+
+// macOS system-audio loopback: Chromium can capture the Mac's output via
+// ScreenCaptureKit, but only behind these feature flags. Must be set before
+// app is ready. This is what lets us record both sides of an online meeting
+// without a virtual audio driver (BlackHole etc.).
+if (process.platform === 'darwin') {
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'MacLoopbackAudioForScreenShare,MacSckSystemAudioLoopbackOverride'
+  );
+}
+
+// --- Crash diagnostics ---------------------------------------------------
+// When the app "just closes", the reason is usually a renderer/GPU/utility
+// child-process crash or an uncaught error. Log all of those (with reasons) to
+// userData/crash.log AND stderr so we can see exactly what happened.
+function diagLogPath() {
+  try { return path.join(app.getPath('userData'), 'crash.log'); } catch { return null; }
+}
+function diag(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  console.error(line);
+  const p = diagLogPath();
+  if (p) { try { fs.appendFileSync(p, line + '\n'); } catch {} }
+}
+function installCrashDiagnostics() {
+  process.on('uncaughtException', (err) => diag(`uncaughtException: ${err && err.stack ? err.stack : err}`));
+  process.on('unhandledRejection', (reason) => diag(`unhandledRejection: ${reason && reason.stack ? reason.stack : reason}`));
+  // GPU / utility / renderer child processes dying (this is what silently closes the window).
+  app.on('child-process-gone', (_e, details) => diag(`child-process-gone: ${JSON.stringify(details)}`));
+  app.on('render-process-gone', (_e, _wc, details) => diag(`render-process-gone: ${JSON.stringify(details)}`));
+  diag(`--- app start (pid ${process.pid}, electron ${process.versions.electron}, ${process.platform}/${process.arch}) ---`);
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -25,16 +59,47 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  // Surface renderer-side errors and crashes to the same log.
+  const wc = mainWindow.webContents;
+  wc.on('render-process-gone', (_e, details) => diag(`renderer gone: ${JSON.stringify(details)}`));
+  wc.on('unresponsive', () => diag('renderer unresponsive'));
+  wc.on('console-message', (e, ...legacy) => {
+    // Electron >=32 passes a single event object; older versions passed
+    // positional (event, level, message, line, sourceId). Support both.
+    const level = e && e.level !== undefined ? e.level : legacy[0];
+    const message = e && e.message !== undefined ? e.message : legacy[1];
+    const line = e && e.lineNumber !== undefined ? e.lineNumber : legacy[2];
+    const sourceId = e && e.sourceId !== undefined ? e.sourceId : legacy[3];
+    const severe = level === 'warning' || level === 'error' || (typeof level === 'number' && level >= 2);
+    if (severe) diag(`renderer console[${level}]: ${message} (${sourceId}:${line})`);
+  });
 }
 
 app.whenReady().then(() => {
+  installCrashDiagnostics();
+
   // Point the model cache at userData so it works in both dev and packaged builds.
   // Inside an ASAR archive node_modules is read-only; userData is always writable.
   whisper.setCacheDir(path.join(app.getPath('userData'), 'models'));
+  whisper.setLogger(diag);
 
-  // Allow the renderer's getUserMedia (microphone) requests.
+  // Allow the renderer's getUserMedia (microphone) and system-audio requests.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'media' || permission === 'audioCapture');
+    callback(permission === 'media' || permission === 'audioCapture' || permission === 'display-capture');
+  });
+
+  // System-audio capture: when the renderer calls getDisplayMedia we hand it
+  // the primary screen with loopback audio (no picker UI). The renderer drops
+  // the video track immediately — we only want the Mac's output audio.
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+      if (!sources.length) throw new Error('no screen sources');
+      callback({ video: sources[0], audio: 'loopback' });
+    }).catch((err) => {
+      diag(`display-media handler failed: ${err && err.message ? err.message : err}`);
+      try { callback({}); } catch {}
+    });
   });
   registerIpc();
   createWindow();
@@ -77,6 +142,14 @@ function registerIpc() {
     }
   });
 
+  // --- System-audio (screen-capture) permission status, for UI hints ---
+  // macOS gates loopback audio behind Screen & System Audio Recording; there is
+  // no programmatic prompt for it — the first capture attempt triggers one.
+  ipcMain.handle('audio:systemAudioStatus', () => {
+    if (process.platform !== 'darwin') return 'granted';
+    try { return systemPreferences.getMediaAccessStatus('screen'); } catch { return 'unknown'; }
+  });
+
   // --- Transcription: run local Whisper on mono 16kHz PCM ---
   ipcMain.handle('transcribe:run', async (event, pcm, opts = {}) => {
     const prefs = settings.loadPrefs();
@@ -87,6 +160,7 @@ function registerIpc() {
     const samples = pcm instanceof Float32Array ? pcm : new Float32Array(pcm);
     return whisper.transcribe(samples, {
       model: opts.model || prefs.transcriptionModel,
+      dtype: opts.dtype || prefs.transcriptionDtype,
       language: opts.language || prefs.language,
       onProgress,
     });
@@ -135,10 +209,11 @@ function registerIpc() {
 
   // --- Whisper model pre-download for setup wizard ---
   ipcMain.handle('whisper:preload', async (event, model) => {
+    const prefs = settings.loadPrefs();
     const onProgress = (p) => {
       if (!event.sender.isDestroyed()) event.sender.send('whisper:preload-progress', p);
     };
-    await whisper.getPipeline(model, onProgress);
+    await whisper.preload(model, onProgress, prefs.transcriptionDtype);
   });
 
   // --- Open URL in system browser ---

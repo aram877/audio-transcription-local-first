@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   // Audio
   pickAudioFile: () => ipcRenderer.invoke('audio:pickFile'),
   requestMicAccess: () => ipcRenderer.invoke('audio:requestMicAccess'),
+  systemAudioStatus: () => ipcRenderer.invoke('audio:systemAudioStatus'),
 
   // Transcription — pcm is a Float32Array (mono 16kHz) prepared in the renderer
   transcribe: (pcm, opts) => ipcRenderer.invoke('transcribe:run', pcm, opts),

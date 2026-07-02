@@ -16,6 +16,9 @@ const DEFAULTS = {
   ollamaBaseUrl: 'http://localhost:11434',
   ollamaModel: 'llama3.1',
   transcriptionModel: 'onnx-community/whisper-base',
+  // int8 weights: keeps onnxruntime's allocations small enough that Electron's
+  // Chromium allocator doesn't hard-abort the app when loading large models.
+  transcriptionDtype: 'q8',
   language: 'auto',
   setupComplete: false,
 };

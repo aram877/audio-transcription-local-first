@@ -20,6 +20,13 @@ const state = {
 let audioEl = null;
 let rafId = null;
 let waveformPeaks = null;
+let playerDuration = 0; // known duration (s); recorded WebM reports Infinity, so we track it ourselves
+
+// Real media duration when finite, else the known PCM-derived duration.
+function effectiveDuration() {
+  if (audioEl && isFinite(audioEl.duration) && audioEl.duration > 0) return audioEl.duration;
+  return playerDuration;
+}
 
 function computePeaks(pcm, count) {
   const peaks = new Float32Array(count);
@@ -48,7 +55,8 @@ function drawWaveform() {
   canvas.height = H * dpr;
   ctx.scale(dpr, dpr);
 
-  const progress = audioEl && audioEl.duration ? audioEl.currentTime / audioEl.duration : 0;
+  const dur = effectiveDuration();
+  const progress = audioEl && dur ? Math.min(1, audioEl.currentTime / dur) : 0;
   const playedX = progress * W;
   const barW = 2, gap = 1, step = barW + gap;
   const numBars = Math.floor(W / step);
@@ -69,7 +77,7 @@ function drawWaveform() {
 
 function updateTimeDisplay() {
   if (!audioEl) return;
-  el('play-time').textContent = `${fmtTime(audioEl.currentTime)} / ${fmtTime(audioEl.duration || 0)}`;
+  el('play-time').textContent = `${fmtTime(audioEl.currentTime)} / ${fmtTime(effectiveDuration())}`;
 }
 
 function startAnimation() {
@@ -88,20 +96,26 @@ function setupAudioPlayer(blob) {
   audioEl.addEventListener('pause', () => { el('play-btn').textContent = '▶'; stopAnimation(); drawWaveform(); });
   audioEl.addEventListener('ended', () => { el('play-btn').textContent = '▶'; stopAnimation(); drawWaveform(); });
   audioEl.addEventListener('loadedmetadata', updateTimeDisplay);
+  playerDuration = state.pcm ? state.pcm.length / TARGET_SAMPLE_RATE : 0;
   waveformPeaks = computePeaks(state.pcm, 1000);
   el('audio-player').hidden = false;
+  updateTimeDisplay();
   requestAnimationFrame(drawWaveform);
 }
 
 el('play-btn').addEventListener('click', () => {
   if (!audioEl) return;
-  if (audioEl.paused) audioEl.play(); else audioEl.pause();
+  if (audioEl.paused) audioEl.play().catch((err) => setStatus(`Playback failed: ${err.message}`, true));
+  else audioEl.pause();
 });
 
 el('waveform').addEventListener('click', (e) => {
-  if (!audioEl || !audioEl.duration) return;
+  const dur = effectiveDuration();
+  if (!audioEl || !dur || !isFinite(dur)) return;
   const rect = el('waveform').getBoundingClientRect();
-  audioEl.currentTime = ((e.clientX - rect.left) / rect.width) * audioEl.duration;
+  const target = ((e.clientX - rect.left) / rect.width) * dur;
+  if (!isFinite(target)) return;
+  try { audioEl.currentTime = target; } catch {}
   drawWaveform();
   updateTimeDisplay();
 });
@@ -202,9 +216,35 @@ async function decodeAndResample(file) {
 // ---- Microphone recording ----
 let mediaRecorder = null;
 let recordedChunks = [];
-let recordStream = null;
+let recordStream = null;      // microphone stream
+let systemStream = null;      // optional system-audio loopback stream (getDisplayMedia)
+let mixContext = null;        // Web Audio graph that mixes mic + system into one
 let recordTimer = null;
 let recordSeconds = 0;
+
+// Capture the Mac's output audio via Chromium's loopback path (ScreenCaptureKit
+// under the hood — set up in the main process). Returns an audio-only stream.
+async function getSystemAudioStream() {
+  const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+  // We only want the audio; drop the mandatory video track right away.
+  stream.getVideoTracks().forEach((t) => { try { t.stop(); stream.removeTrack(t); } catch {} });
+  if (stream.getAudioTracks().length === 0) {
+    stream.getTracks().forEach((t) => t.stop());
+    throw new Error('system returned no audio track');
+  }
+  return stream;
+}
+
+// Human guidance when macOS blocks system-audio capture.
+async function systemAudioDeniedHint() {
+  try {
+    const status = await window.api.systemAudioStatus();
+    if (status !== 'granted') {
+      return ' Enable it in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.';
+    }
+  } catch {}
+  return '';
+}
 
 async function listInputDevices() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
@@ -215,6 +255,8 @@ async function listInputDevices() {
     return;
   }
   const inputs = devices.filter((d) => d.kind === 'audioinput');
+
+  // Mic picker.
   const sel = el('mic-select');
   const current = sel.value;
   sel.innerHTML = '<option value="">System default</option>';
@@ -253,12 +295,44 @@ async function startRecording() {
     return;
   }
 
+  // Optional second source: the Mac's own output audio (the other side of an
+  // online meeting), captured natively via loopback — no virtual device needed.
+  if (el('sys-audio-check').checked) {
+    try {
+      systemStream = await getSystemAudioStream();
+    } catch (err) {
+      systemStream = null;
+      const hint = await systemAudioDeniedHint();
+      setStatus(`Recording mic only — system audio unavailable: ${(err && err.message) || err}.${hint}`, true);
+    }
+  }
+
   await listInputDevices(); // labels are available now that permission is granted
+
+  // The stream MediaRecorder records: either the mic alone, or mic + system
+  // mixed together via a Web Audio graph.
+  let captureStream = recordStream;
+  if (systemStream) {
+    try {
+      mixContext = new (window.AudioContext || window.webkitAudioContext)();
+      const dest = mixContext.createMediaStreamDestination();
+      mixContext.createMediaStreamSource(recordStream).connect(dest);
+      mixContext.createMediaStreamSource(systemStream).connect(dest);
+      captureStream = dest.stream;
+    } catch (err) {
+      // Fall back to mic-only if mixing fails for any reason.
+      closeMix();
+      try { systemStream.getTracks().forEach((t) => t.stop()); } catch {}
+      systemStream = null;
+      captureStream = recordStream;
+      setStatus(`Recording mic only — could not mix system audio: ${(err && err.message) || err}`, true);
+    }
+  }
 
   recordedChunks = [];
   const mime = pickRecorderMime();
   try {
-    mediaRecorder = mime ? new MediaRecorder(recordStream, { mimeType: mime }) : new MediaRecorder(recordStream);
+    mediaRecorder = mime ? new MediaRecorder(captureStream, { mimeType: mime }) : new MediaRecorder(captureStream);
   } catch (err) {
     setStatus(`Cannot start recorder: ${err.message}`, true);
     stopStream();
@@ -266,16 +340,26 @@ async function startRecording() {
   }
   mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = onRecordingStop;
-  mediaRecorder.start();
+  mediaRecorder.onerror = (e) => {
+    setStatus(`Recorder error: ${(e.error && e.error.message) || 'unknown'} — stopping.`, true);
+    stopRecording();
+  };
+  // If the mic goes away mid-recording (device unplugged), stop cleanly and
+  // keep what we captured instead of hanging.
+  recordStream.getAudioTracks().forEach((t) => t.addEventListener('ended', stopRecording));
+  // Emit data every second so a long recording never sits in one giant
+  // in-memory buffer (and a crash loses at most the final second).
+  mediaRecorder.start(1000);
 
   el('record-btn').textContent = '■ Stop';
   el('record-btn').classList.add('recording');
   el('transcribe-btn').disabled = true;
   recordSeconds = 0;
-  setStatus('Recording… 00:00');
+  const modeLabel = systemStream ? ' (mic + system audio)' : '';
+  setStatus(`Recording${modeLabel}… 00:00`);
   recordTimer = setInterval(() => {
     recordSeconds += 1;
-    setStatus(`Recording… ${fmtTime(recordSeconds)}`);
+    setStatus(`Recording${modeLabel}… ${fmtTime(recordSeconds)}`);
   }, 1000);
 }
 
@@ -288,11 +372,23 @@ function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
 }
 
+function closeMix() {
+  if (mixContext) {
+    try { mixContext.close(); } catch {}
+    mixContext = null;
+  }
+}
+
 function stopStream() {
   if (recordStream) {
     recordStream.getTracks().forEach((t) => t.stop());
     recordStream = null;
   }
+  if (systemStream) {
+    systemStream.getTracks().forEach((t) => t.stop());
+    systemStream = null;
+  }
+  closeMix();
 }
 
 async function onRecordingStop() {
@@ -412,6 +508,7 @@ async function persistAfterTranscribe(langLabel) {
 }
 
 function fmtTime(s) {
+  if (!isFinite(s) || s < 0) s = 0; // recorded WebM can report Infinity/NaN duration
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
@@ -433,8 +530,9 @@ function renderTranscript(t) {
     if (audioEl) {
       ts.title = 'Jump to this position';
       ts.addEventListener('click', () => {
-        audioEl.currentTime = seg.start;
-        if (audioEl.paused) audioEl.play();
+        if (!audioEl || !isFinite(seg.start)) return;
+        try { audioEl.currentTime = seg.start; } catch {}
+        if (audioEl.paused) audioEl.play().catch(() => {});
         drawWaveform();
       });
     }

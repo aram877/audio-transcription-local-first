@@ -12,7 +12,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^31.0.0",
+    "electron": "38.8.6",
     "electron-builder": "^24.0.0"
   },
   "dependencies": {
@@ -33,13 +33,32 @@
       "**/@huggingface/transformers/**"
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }]
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
     },
     "linux": {
-      "target": [{ "target": "AppImage" }]
+      "target": [
+        {
+          "target": "AppImage"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

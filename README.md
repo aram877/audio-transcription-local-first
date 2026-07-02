@@ -5,7 +5,10 @@ Desktop app (Electron): record or import audio, transcribe it **locally** with W
 - **Transcription** runs on-device via `@huggingface/transformers` (Whisper / ONNX). The first run downloads the model once; after that it works offline.
 - **Summarization** defaults to a **local** LLM through Ollama (`http://localhost:11434`) — nothing leaves your machine. Cloud Claude is an optional, explicitly-selected fallback.
 - **Language**: auto-detect or pick a specific spoken language before transcribing.
-- **Input**: import an audio file (`.wav/.mp3/.m4a/.ogg/.flac/.webm`) or record from the microphone.
+- **Input**: import an audio file (`.wav/.mp3/.m4a/.ogg/.flac/.webm`) or record from the microphone —
+  optionally **mixed with the Mac's system audio** (both sides of an online meeting), captured natively
+  via ScreenCaptureKit loopback. No virtual audio driver needed; macOS asks once for
+  *Screen & System Audio Recording* permission.
 
 ## Requirements
 
@@ -19,11 +22,20 @@ Desktop app (Electron): record or import audio, transcribe it **locally** with W
 
 ```bash
 npm install      # installs Electron + dependencies (downloads the Electron binary)
-npm start        # launches the app
+npm run dev      # development: builds + launches with hot reload
 ```
 
-> If `npm start` reports "Electron failed to install correctly", run:
-> `node node_modules/electron/install.js` (needs network access), then `npm start` again.
+Other scripts:
+
+```bash
+npm run build      # compile TypeScript bundles into out/
+npm start          # preview the production build (runs `build` output)
+npm run typecheck  # tsc --noEmit
+npm test           # vitest unit tests
+```
+
+> If Electron fails to start with "Electron failed to install correctly", run:
+> `node node_modules/electron/install.js` (needs network access), then try again.
 
 ## Using it
 
@@ -35,18 +47,27 @@ npm start        # launches the app
    - **Settings → Provider = Claude**: paste an Anthropic API key (stored encrypted via the OS keychain).
 5. Export the transcript to `.txt`.
 
-## Project layout
+## Architecture
+
+TypeScript throughout, organized as **ports & adapters** (hexagonal-lite): the domain core defines
+the pipeline's types and interfaces; adapters provide swappable implementations; the app layer is
+Electron glue; the UI is sliced by feature.
 
 ```
 src/
-  main/            Electron main process (window, IPC)
-    transcription/ local Whisper engine
-    summarization/ provider interface + Ollama (local) + Claude (cloud)
-    storage/       recordings library (audio + transcript + summary on disk)
-    settings.js    preferences + encrypted API-key storage
-    main.js, preload.js
-  renderer/        UI (decode/resample audio, record, views)
-  shared/          types + supported formats
+  core/            pure domain — types, ports (TranscriptionEngine, SummarizationProvider,
+                   RecordingStore), audio formats. No Electron, no DOM.
+  adapters/
+    transcription/ Whisper via @huggingface/transformers, run in an isolated utilityProcess
+                   (a crash or OOM in inference cannot take the app down)
+    summarization/ provider registry + Ollama (local) + Claude (cloud)
+    storage/       recordings library (filesystem) + settings/encrypted API-key store
+  app/
+    ipc/           the typed IPC contract — channels, payload shapes, and the window.api type
+    main/          composition root: wires adapters into IPC, window + crash diagnostics
+    preload/       contextBridge facade implementing the contract's Api type
+  ui/              feature-sliced renderer (record/, library/, settings/, setup/, shared/)
+test/              vitest unit tests
 openspec/          spec-driven change docs (proposal, design, specs, tasks)
 ```
 

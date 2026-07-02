@@ -2,18 +2,26 @@
   "name": "audio-transcription",
   "version": "0.1.0",
   "description": "Desktop app: record or import audio, transcribe locally with Whisper, and summarize with an LLM.",
-  "main": "src/main/main.js",
+  "main": "out/main/index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "electron .",
-    "test": "node --test test/",
-    "dist": "electron-builder"
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dist": "electron-vite build && electron-builder"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^26.1.0",
     "electron": "38.8.6",
-    "electron-builder": "^24.0.0"
+    "electron-builder": "^24.0.0",
+    "electron-vite": "^5.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.9"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
@@ -23,7 +31,7 @@
     "appId": "io.aram877.audio-transcription",
     "productName": "Audio Transcription",
     "files": [
-      "src/**/*",
+      "out/**/*",
       "package.json",
       "!node_modules/@huggingface/transformers/.cache/**"
     ],
